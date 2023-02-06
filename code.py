@@ -13,6 +13,7 @@ sx = np.array(((0, 1), (1, 0)), complex)
 sy = np.array(((0, -1j), (1j, 0)), complex)
 sz = np.array(((1, 0), (0, -1)), complex)
 s0 = np.identity(su2) + 0j
+
 # Define the gamma matrices
 gamma = np.zeros((4, 2, 2), dtype=np.complex128)
 gamma[0, :, :] = np.array([[0, 1], [1, 0]])
@@ -89,44 +90,52 @@ def FermionMatrix(D_up, D_down, chi, gauge):
 
 ###################################################################################################################
 """Example of quark fields with Dirac, flavor and color indices, here for SU(3)"""
-colour = 3
+
+"""References:
+1. ChatGPT
+2. Implementation of the lattice Dirac operator, Luscher"""
+
+color = 3
 Dirac = 4
 su3 = 3
-quark = np.zeros((Nx, Ny, Nz, Nt, colour, Dirac))
+
 
 gamma_0 = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, -1, 0], [0, 0, 0, -1]])
 gamma_1 = np.array([[0, 0, 0, 1], [0, 0, 1, 0], [0, -1, 0, 0], [-1, 0, 0, 0]])
 gamma_2 = np.array([[0, 0, 0, -1j], [0, 0, 1j, 0], [0, 1j, 0, 0], [-1j, 0, 0, 0]])
 gamma_3 = np.array([[0, 0, 1, 0], [0, 0, 0, -1], [1, 0, 0, 0], [0, -1, 0, 0]])
 
+gamma = np.zeros(((4, 4, 4)), dtype=complex)
+
+gamma[0] = gamma_0
+gamma[1] = gamma_1
+gamma[2] = gamma_2
+gamma[3] = gamma_3
+
 
 @njit()
-def quarkfield(quark: np.array, forloops: bool):
+def quarkfield(quark, forloops):
 
     """Each flavor of fermion (quark) has 4 space-time indices, 3 color
      indices and 4 spinor (Dirac) indices"""
 
-    forloops = False
     if forloops:
         for x in range(Nx):
             for y in range(Ny):
                 for z in range(Nz):
                     for t in range(Nt):
-                        for Nc in range(colour):
-                            for spinor in range(Dirac):
-                                quark[x, y, z, t, Nc, spinor] = complex(
+                        for spinor in range(Dirac):
+                            for Nc in range(color):
+                                quark[x, y, z, t, spinor, Nc] = complex(
                                     np.random.rand(), np.random.rand()
                                 )
     # oppure più banalmente
     if not forloops:
-        quark = np.random.rand(Nx, Ny, Nz, Nt, colour, Dirac) + 1j * np.random.rand(
-            Nx, Ny, Nz, Nt, colour, Dirac
+        quark = np.random.rand(Nx, Ny, Nz, Nt, Dirac, color) + 1j * np.random.rand(
+            Nx, Ny, Nz, Nt, color, Dirac
         )
 
     return quark
-
-
-gaugesu3 = np.zeros((Nx, Ny, Nz, Nt, 4, su3, su3))
 
 
 @njit()
@@ -137,12 +146,10 @@ def initializefield(gaugesu3):
             for z in range(Nz):
                 for t in range(Nt):
                     for mu in range(4):
-                        gaugesu3 = SU3SingleMatrix()
+                        gaugesu3[x, y, z, t, mu] = SU3SingleMatrix()
 
     return gaugesu3
 
-
-quark = quarkfield(quark, False)
 
 # Ogni quark ha in totale 4*3=12 componenti indipendenti
 # i quarks si accoppiano al gauge tramite gli indici di colore
@@ -151,6 +158,13 @@ quark = quarkfield(quark, False)
 # le matrici gamma accoppiano gli spinori con gli indici spaziotempo e gli indici di colore con il gauge
 # gli indici spinoriali sono contratti con quelli spaziotemporali
 # The interaction between quarks and gluons is described by the coupling between the Gamma matrices and the gauge field.
+# dimension of quark fields: 4 x 3 x Nx x Ny x Nz x Nt
+# dimension of Dirac matrix on each lattice site is 4x4
+# direction mu and spinor indices are in the same for loops
+
+# In a lattice gauge theory, on each lattice site, the Dirac matrix indices are 4 spinor indices and 4 space-time indices (mu = 1, ..., 4), representing the components of the Dirac spinor and the direction of the space-time derivatives, respectively.
+# The spinor indices run from 1 to 4 and represent the 4 components of a Dirac spinor, while the space-time indices indicate the direction of the space-time derivatives in the lattice theory.
+# The Dirac matrix couples with the gauge field through the color indices, which are also present in the theory and run from 1 to 3.
 
 
 def Dirac_matrix(u, quarks, i, j, k, l):
@@ -175,11 +189,45 @@ def Dirac_matrix(u, quarks, i, j, k, l):
     return dirac_matrix
 
 
-def DiracMatrixLattice():
+# @njit()
+def DiracMatrixLattice(U, q, dirac_matrix):
+    # non ne sono per nulla sicuro, ma sono test per ora
     for x in range(Nx):
         for y in range(Ny):
             for z in range(Nz):
                 for t in range(Nt):
-                    for mu in range(4):  # qui ci deve essere la somma sulle direzioni
-                        pass
+                    for mu in range(4):  # directions
+                        for i in range(Dirac):  # spinor index
+                            for j in range(color):  # color
+                                for k in range(color):
+                                    for l in range(color):
+                                        # reference 1. example
+                                        dirac_matrix[x, y, z, t, mu, i, j, k] += 0.5 * (
+                                            np.identity(4, dtype=complex)[i, l]
+                                            * np.identity(3, dtype=complex)[j, k]
+                                            + U[x, y, z, t, mu, j, l]
+                                            * gamma[mu][i, l]
+                                            * np.identity(3, dtype=complex)[j, k]
+                                        )
+                                #         # dirac_matrix[x, y, z, t, mu, i, j, k] += 0.5 * (
+                                #         #     U[x, y, z, t, mu, j, l]
+                                #         #     * (1 - gamma[mu][i, l])
+                                #         #     * q[x, y, z, t, i, j]
+                                #         # )
+
+    print(dirac_matrix)
+
+
+if __name__ == "__main__":
+
+    gaugesu3 = np.zeros((Nx, Ny, Nz, Nt, 4, su3, su3), dtype=complex)
+    quark = np.zeros((Nx, Ny, Nz, Nt, Dirac, color), dtype=complex)
+    dirac_matrix = np.zeros((Nx, Ny, Nz, Nt, Dirac, Dirac, color, color), dtype=complex)
+    # the Dirac matrix is 12*12 on each lattice point, it is in agreement with ref. 2 -> Dirac M. decomposed in 4 blocks
+    # each bloc is 6x6 for a total of 144 independent elements on each lattice site
+
+    U = initializefield(gaugesu3)
+    quark = quarkfield(quark, True)
+
+    dirac = DiracMatrixLattice(U, quark, dirac_matrix)
 
