@@ -1,43 +1,116 @@
 import numpy as np
 from numba import njit, float64, int64
 
-from algebra import *
-from randomSU2 import *
-import parameters as par
 
-su3 = par.su3
-su2 = par.su2
-epsilon = par.epsilon
-N = par.N
-pool_size = par.pool_size
+su3 = 3
+su2 = 2
+epsilon = 0.2
+N = 5
+pool_size = 4000000
 
 sx = np.array(((0, 1), (1, 0)), complex)
 sy = np.array(((0, -1j), (1j, 0)), complex)
 sz = np.array(((1, 0), (0, -1)), complex)
 
+@njit()
+def HB_updating_links(beta, U, N):
 
-def SU3_pool_generator(pool_size):
+    """Update each link via the heatbath algorithm"""
 
-    """Generate a pool of SU(3) matrices starting from the subgroup SU(2) and projecting on SU(3)"""
+    for t in range(N):
+        for x in range(N):
+            for y in range(N):
+                for z in range(N):
 
-    # following pag 83 Gattringer
-    su2_pool = SU2_pool_generator(pool_size * 3, epsilon=epsilon)
-    su3_pool = np.zeros((pool_size, su3, su3), complex)
+                    # U[t, x, y, z] = PeriodicBC(U, t, x, y, z, N)
 
-    for i in range(round(pool_size / 2)):  # half pool RST and half RST. conj.T
-        r = su2_pool[i]
-        s = su2_pool[i + round(pool_size / 2)]
-        t = su2_pool[i + 2 * round(pool_size / 2)]
+                    for mu in range(4):
 
-        R = np.array(((r[0, 0], r[0, 1], 0), (r[1, 0], r[1, 1], 0), (0, 0, 1)))
-        S = np.array(((s[0, 0], 0, s[0, 1]), (0, 1, 0), (s[1, 0], 0, s[1, 1])))
-        T = np.array(((1, 0, 0), (0, t[0, 0], t[0, 1]), (0, t[1, 0], t[1, 1])))
+                        # l'idea è creare 3 heatbath 'annidati'
+                        # in modo da estrarre R dall'heatbath di W=UA,
+                        # S dall'heathbath di W=RUA e T dall'heathbath di W=SRUA
 
-        su3_pool[i] = R @ S @ T
-        su3_pool[i + round(pool_size / 2)] = (su3_pool[i].conj().T).copy()
+                        Utemp = U[t, x, y, z, mu]
 
-    return su3_pool
+                        # staple must be initialized for each calculus
 
+                        A = staple_calculus(t, x, y, z, mu, U)
+                        W = np.dot(Utemp, A)
+
+                        a = np.linalg.det(W)
+
+                        if a != 0:
+                            # else:
+                            r = heatbath_SU3(W, beta, "R")
+                            R = np.array(
+                                (
+                                    (r[0, 0], r[0, 1], 0),
+                                    (r[1, 0], r[1, 1], 0),
+                                    (0, 0, 1),
+                                )
+                            )
+
+                            W = np.dot(R, W)
+                            s = heatbath_SU3(W, beta, "S")
+
+                            S = np.array(
+                                (
+                                    (s[0, 0], 0, s[0, 1]),
+                                    (0, 1, 0),
+                                    (s[1, 0], 0, s[1, 1]),
+                                )
+                            )
+
+                            W = np.dot(S, W)
+
+                            tt = heatbath_SU3(W, beta, "T")
+
+                            T = np.array(
+                                (
+                                    (1, 0, 0),
+                                    (0, tt[0, 0], tt[0, 1]),
+                                    (0, tt[1, 0], tt[1, 1]),
+                                )
+                            )
+                            # U'=TSRU
+                            Uprime = T @ S @ R @ Utemp
+                            U[t, x, y, z, mu] = Uprime
+
+                        else:
+                            U[t, x, y, z, mu] = SU3SingleMatrix()
+
+    return U
+
+@njit()
+def heatbath_SU3(W, beta, subgrp, kind=1):
+
+    """Execute Heat Bath on each of three submatrices of SU(3) (R, S; and T) through the quaternion representation. HB 
+    extracts the SU(2) matrix directly from the distribution that leaves the Haar measure invariant"""
+
+    if subgrp == "R":
+        Wsub = np.array(((W[0, 0], W[0, 1]), (W[1, 0], W[1, 1])))
+    if subgrp == "S":
+        Wsub = np.array(((W[0, 0], W[0, 2]), (W[2, 0], W[2, 2])))
+    if subgrp == "T":
+        Wsub = np.array(((W[1, 1], W[1, 2]), (W[2, 1], W[2, 2])))
+
+    if kind == 1:
+        w = getA(Wsub)
+        a = np.sqrt(np.abs(np.linalg.det(Wsub)))
+        wbar = quaternion(normalize(w))
+
+        if a != 0:
+            xw = quaternion(sampleA(beta * 2 / 3, a))
+
+            xx = xw @ wbar.conj().T  ###!!!!warning!!!
+
+            return xx
+
+        else:
+            return SU2SingleMatrix()
+
+    if kind == 2:
+        return sample_HB_SU2(Wsub, beta)
 
 @njit()
 def SU2SingleMatrix():
@@ -106,176 +179,6 @@ def SU3SingleMatrix():
         SU3Matrix = (R @ S @ T).conj().T
 
     return SU3Matrix
-
-
-def initialize_lattice(start, N):
-
-    """Name says"""
-
-    U = np.zeros((N, N, N, N, 4, su3, su3), complex)
-    su3_pool = SU3_pool_generator(pool_size=pool_size)
-
-    for t in range(N):
-        for x in range(N):
-            for y in range(N):
-                for z in range(N):
-                    for mu in range(4):
-                        if start == 0:
-                            U[t, x, y, z, mu] = np.identity(su3)
-                        if start == 1:
-                            U[t, x, y, z, mu] = su3_pool[
-                                np.random.randint(0, pool_size)
-                            ]
-    return U
-
-
-@njit()
-def staple_calculus(t, x, y, z, mu, U):
-
-    """Calculate the contribution (interaction) of the three links sorrounding the link that we want to update"""
-    # staple_start = np.zeros((su3, su3), complex)
-    staple_start = np.array(
-        ((0 + 0j, 0 + 0j, 0 + 0j), (0 + 0j, 0 + 0j, 0 + 0j), (0 + 0j, 0 + 0j, 0 + 0j),)
-    )
-    # staple_start = np.empty((3, 3)) + 0j
-
-    a_mu = [0, 0, 0, 0]
-    a_mu[mu] = 1
-
-    for nu in range(4):
-
-        if mu != nu:
-            # nu = 0
-            # while nu < mu:
-            a_nu = [0, 0, 0, 0]
-            a_nu[nu] = 1
-
-            # product of 6 matrices
-            staple_start += (
-                U[
-                    (t + a_mu[0]) % N,
-                    (x + a_mu[1]) % N,
-                    (y + a_mu[2]) % N,
-                    (z + a_mu[3]) % N,
-                    nu,
-                ]
-                @ U[
-                    (t + a_nu[0]) % N,
-                    (x + a_nu[1]) % N,
-                    (y + a_nu[2]) % N,
-                    (z + a_nu[3]) % N,
-                    mu,
-                ]
-                .conj()
-                .T
-                @ U[t, x, y, z, nu].conj().T
-            )
-
-            staple_start += (
-                U[
-                    (t + a_mu[0] - a_nu[0]) % N,
-                    (x + a_mu[1] - a_nu[1]) % N,
-                    (y + a_mu[2] - a_nu[2]) % N,
-                    (z + a_mu[3] - a_nu[3]) % N,
-                    nu,
-                ]
-                .conj()
-                .T
-                @ U[
-                    (t - a_nu[0]) % N,
-                    (x - a_nu[1]) % N,
-                    (y - a_nu[2]) % N,
-                    (z - a_nu[3]) % N,
-                    mu,
-                ]
-                .conj()
-                .T
-                @ U[
-                    (t - a_nu[0]) % N,
-                    (x - a_nu[1]) % N,
-                    (y - a_nu[2]) % N,
-                    (z - a_nu[3]) % N,
-                    nu,
-                ]
-            )
-            # nu += 1
-        else:
-            continue
-
-    return staple_start
-
-
-@njit()
-def staple_calculusProvaScema(t, x, y, z, mu, U):
-
-    """Calculate the contribution (interaction) of the three links sorrounding the link that we want to update"""
-    # staple_start = np.zeros((su3, su3), complex)
-    staple_start = np.array(
-        ((0 + 0j, 0 + 0j, 0 + 0j), (0 + 0j, 0 + 0j, 0 + 0j), (0 + 0j, 0 + 0j, 0 + 0j),)
-    )
-    # staple_start = np.empty((3, 3)) + 0j
-
-    a_mu = [0, 0, 0, 0]
-    a_mu[mu] = 1
-
-    for nu in range(mu + 1, 4):
-
-        # nu = 0
-        # while nu < mu:
-        a_nu = [0, 0, 0, 0]
-        a_nu[nu] = 1
-
-        # product of 6 matrices
-        staple_start += (
-            U[
-                (t + a_mu[0]) % N,
-                (x + a_mu[1]) % N,
-                (y + a_mu[2]) % N,
-                (z + a_mu[3]) % N,
-                nu,
-            ]
-            @ U[
-                (t + a_nu[0]) % N,
-                (x + a_nu[1]) % N,
-                (y + a_nu[2]) % N,
-                (z + a_nu[3]) % N,
-                mu,
-            ]
-            .conj()
-            .T
-            @ U[t, x, y, z, nu].conj().T
-        )
-
-        staple_start += (
-            U[
-                (t + a_mu[0] - a_nu[0]) % N,
-                (x + a_mu[1] - a_nu[1]) % N,
-                (y + a_mu[2] - a_nu[2]) % N,
-                (z + a_mu[3] - a_nu[3]) % N,
-                nu,
-            ]
-            .conj()
-            .T
-            @ U[
-                (t - a_nu[0]) % N,
-                (x - a_nu[1]) % N,
-                (y - a_nu[2]) % N,
-                (z - a_nu[3]) % N,
-                mu,
-            ]
-            .conj()
-            .T
-            @ U[
-                (t - a_nu[0]) % N,
-                (x - a_nu[1]) % N,
-                (y - a_nu[2]) % N,
-                (z - a_nu[3]) % N,
-                nu,
-            ]
-        )
-        # nu += 1
-
-    return staple_start
 
 
 @njit()
