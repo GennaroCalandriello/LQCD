@@ -2,6 +2,7 @@ import numpy as np
 from numba import njit
 
 from module.functionsu3 import *
+from level_spacing_eval import *
 
 # Define the gamma matrices
 gamma_0 = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, -1, 0], [0, 0, 0, -1]])
@@ -109,7 +110,7 @@ def DiracMatrix(U, psi, D):
 
     # The Dirac matrix in lattice QCD is represented as a 4x4 complex matrix for each lattice site.
 
-    m = 0.08
+    m = 0.1
     for x in range(Nx):
         for y in range(Ny):
             for z in range(Nz):
@@ -175,7 +176,6 @@ def psibar(psi):
 
 def spacing(eigs):
     spac = []
-    eigs = eigs.flatten()
 
     for i in range(1, len(eigs) - 1):
         spac.append(max(eigs[i + 1] - eigs[i], eigs[i] - eigs[i - 1]))
@@ -187,23 +187,60 @@ if __name__ == "__main__":
 
     import matplotlib.pyplot as plt
 
+    heatbath = True
+
     psi = quarkfield(np.zeros((Nx, Ny, Nz, Nt, 4, 3), complex), True)
     U = initializefield(np.zeros((Nx, Ny, Nz, Nt, 4, 3, 3), complex))
-    for _ in range(100):
-        print("heatbath numero", _)
-        U = HB_updating_links(5.8, U, N)
+
+    if heatbath:
+        for _ in range(100):
+            print("heatbath numero", _)
+            U = HB_updating_links(9.6, U, N)
 
     Dirac = np.zeros((Nx, Ny, Nz, Nt, 4, 4), complex)
     D_nm = DiracMatrix(U, psi, Dirac)
-    # print(D_nm)
 
     eigs, _ = np.linalg.eig(D_nm)
-    print("number of eigenvalues: ", len(eigs.flatten()))
+    eigs = eigs.flatten()
+    eigs = eigs.real
+    eigspure = eigs.copy()
 
-    spac = spacing(eigs.real)
-    spac = np.array((spac))
+    print("number of eigenvalues: ", len(eigs))
+
+    ###-------------------------------------------Unfolding--------------------------------------
+    eigs = np.sort(eigs)
+    unfolded = unfolding_2_punto_0(eigs)
+    spac = spacing(unfolded)
+    spac = spac / np.mean(spac)
+    ###-------------------------------------------------------------------------------------------
+
+    ###----------------------------Statistical predictions from theoretical distributions---------
+    GUE = distribution(spac, "GUE")
+    GSE = distribution(spac, "GSE")
+    GOE = distribution(spac, "GOE")
+    POISSON = distribution(spac, "Poisson")
+    ###--------------------------------------------------------------------------------------------
+
+    x = np.linspace(0, max(spac), len(spac))
     plt.figure()
-    plt.hist(spac, 50, histtype="step")
+    plt.hist(
+        spac,
+        60,
+        density=True,
+        histtype="step",
+        fill=False,
+        color="b",
+        label="Spacing distribution",
+    )
+    plt.plot(x, GUE, "g--", label="GSE")
+    plt.plot(x, GSE, "b--", label="GSE")
+    plt.plot(x, GOE, "r--", label="GOE")
+    plt.plot(x, POISSON, "y--", label="Poisson")
+    plt.legend()
     plt.show()
 
     print("mean spacing", np.mean(spac))
+
+    plt.figure()
+    plt.hist(np.sort(spacing(eigspure)), 50, density=True, histtype="step")
+    plt.show()
