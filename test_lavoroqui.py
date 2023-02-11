@@ -2,25 +2,9 @@ import numpy as np
 from numba import njit
 
 from module.functionsu3 import *
-from level_spacing_eval import *
-
-# Define the gamma matrices
-gamma_0 = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, -1, 0], [0, 0, 0, -1]])
-gamma_1 = np.array([[0, 0, 0, -1j], [0, 0, 1j, 0], [0, -1j, 0, 0], [1j, 0, 0, 0]])
-gamma_2 = np.array([[0, 0, 0, -1], [0, 0, 1, 0], [0, -1, 0, 0], [1, 0, 0, 0]])
-gamma_3 = np.array([[0, 0, 1j, 0], [0, 0, 0, -1j], [-1j, 0, 0, 0], [0, 1j, 0, 0]])
-
-gamma = np.zeros(((4, 4, 4)), dtype=complex)
-
-gamma[0] = gamma_0
-gamma[1] = gamma_1
-gamma[2] = gamma_2
-gamma[3] = gamma_3
-
-N = 5
-Nx, Ny, Nz, Nt = N, N, N, N  # possibility to asymmetric time extensions
-Dirac = 4
-color = 3
+from module.level_spacing_eval import *
+from utils.gamma import *
+from utils.params import *
 
 # @njit()
 def UgammaProd(gamma, U, res):
@@ -85,7 +69,18 @@ def initializefield(U):
 def quarkfield(quark, forloops):
 
     """Each flavor of fermion (quark) has 4 space-time indices, 3 color
-     indices and 4 spinor (Dirac) indices"""
+    indices and 4 spinor (Dirac) indices.
+    The components of the spinor are related to the behavior of the particle in spacetime,
+    and they can be interpreted as representing different aspects of the particle's wavefunction.
+    For example, the first two components of the spinor are often referred to as the particle and 
+    antiparticle components, respectively, while the last two components are related to the particle's
+    spin.
+
+    The precise relation between the components of the Dirac spinor is determined by the specific form
+    of the gamma matrices and the physical conditions under which the particle is considered. 
+    The Dirac equation is a linear partial differential equation, and the relationship between
+    its components is determined by the coefficients of the equation, as well as the boundary
+    conditions that apply to the problem at hand."""
 
     if forloops:
         for x in range(Nx):
@@ -95,7 +90,8 @@ def quarkfield(quark, forloops):
                         for spinor in range(Dirac):
                             for Nc in range(color):
                                 quark[x, y, z, t, spinor, Nc] = complex(
-                                    np.random.rand(), np.random.rand()
+                                    np.random.rand(),
+                                    np.random.rand(),  #### io questo non creto
                                 )
     # oppure più banalmente
     if not forloops:
@@ -110,7 +106,7 @@ def DiracMatrix(U, psi, D):
 
     # The Dirac matrix in lattice QCD is represented as a 4x4 complex matrix for each lattice site.
 
-    m = 0.1
+    m = 1.7
     for x in range(Nx):
         for y in range(Ny):
             for z in range(Nz):
@@ -208,8 +204,8 @@ if __name__ == "__main__":
     print("number of eigenvalues: ", len(eigs))
 
     ###-------------------------------------------Unfolding--------------------------------------
-    eigs = np.sort(eigs)
-    unfolded = unfolding_2_punto_0(eigs)
+    eigs = np.sort(eigs)  # first step is the sort of eigenvalues
+    unfolded = unfolding_2_punto_0(eigs)  # unfold the spectrum
     spac = spacing(unfolded)
     spac = spac / np.mean(spac)
     ###-------------------------------------------------------------------------------------------
@@ -220,7 +216,8 @@ if __name__ == "__main__":
     GOE = distribution(spac, "GOE")
     POISSON = distribution(spac, "Poisson")
     ###--------------------------------------------------------------------------------------------
-
+    e, _ = np.linalg.eig(D_nm[0, 0, 0, 2])
+    print(e)
     x = np.linspace(0, max(spac), len(spac))
     plt.figure()
     plt.hist(
@@ -241,6 +238,8 @@ if __name__ == "__main__":
 
     print("mean spacing", np.mean(spac))
 
+    ###----------------------Normal spectrum histogram-------------------------------
     plt.figure()
-    plt.hist(np.sort(spacing(eigspure)), 50, density=True, histtype="step")
+    plt.hist(np.sort(spacing(eigspure)), 60, density=True, histtype="step")
     plt.show()
+    ###------------------------------------------------------------------------------
