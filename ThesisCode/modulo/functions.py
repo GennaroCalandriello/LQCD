@@ -1,13 +1,13 @@
 import numpy as np
-from numba import njit, jit
 import math
 import matplotlib.pyplot as plt
 import scipy.stats as stats
 
+degrees = 3  # must be 1<= k <=5
+
 
 def get_key(x):
     return x[0]
-
 
 
 def numba_sorted(arr):
@@ -38,76 +38,27 @@ def sorting_and_ranking(eigenvalues):
 
 def spacing_evaluation(ranked_ev):
 
-    N_conf = len(ranked_ev[:])  # number of configurations
-
-    spacing = []
     ranked_ev = np.array(ranked_ev)
+    N_conf = round(max(ranked_ev[:, 1]))  # number of configurations
 
-    for j in range(N_conf):
+    ranked_ordered = sorted(ranked_ev, key=lambda x: x[1])
+    ranked_ordered = np.array(ranked_ordered)
+    spacing = []
+    for j in range(N_conf + 1):
         temp = []
-        for i in range(N_conf):
+
+        for i in range(len(ranked_ev)):
             if ranked_ev[i, 1] == j:
-                temp.append(ranked_ev[i])
-        temp = np.array(temp)
+                temp.append(ranked_ev[i, 0])
+        for i in range(0, len(temp) - 1):
+            # temp1.append(min(temp[i + 1] - temp[i], temp[i] - temp[i - 1]))
+            spacing.append(temp[i + 1] - temp[i])
 
-        for i in range(1, len(temp) - 1):
-            spacing.append(temp[i + 1, 0] - temp[i, 0])
+        # temp1 = temp1 / np.mean(temp1)
+    spacing = np.array((spacing)) / N_conf
+    spacing = spacing / np.mean((spacing))
 
-    spacing = np.array(spacing) / N_conf
-    spacing = spacing / np.mean(spacing)
     return spacing
-
-
-def distribution(sp, kind):
-
-    """Plot theoretical distributions of GSE, GOE, GUE ensemble distributions picking the min and max values of the spacing array
-    calculated in the main program"""
-    s = np.linspace(0, max(sp), len(sp))
-    p = np.zeros(len(s))
-
-    if kind == "GOE":
-        for i in range(len(p)):
-            p[i] = np.pi / 2 * s[i] * np.exp(-np.pi / 4 * s[i] ** 2)
-
-    if kind == "GUE":
-        for i in range(len(p)):
-            p[i] = (32 / np.pi ** 2) * s[i] ** 2 * np.exp(-4 / np.pi * s[i] ** 2)
-
-    if kind == "GSE":
-        for i in range(len(p)):
-            p[i] = (
-                2 ** 18
-                / (3 ** 6 * np.pi ** 3)
-                * s[i] ** 4
-                * np.exp(-(64 / (9 * np.pi)) * s[i] ** 2)
-            )
-    if kind == "Poisson":
-        for i in range(len(p)):
-            p[i] = np.exp(-s[i])
-
-    if kind == "GOE FN":  # lasciamo perdere va...
-
-        a = (27 / 8) * np.pi
-        for i in range(len(p)):
-            p[i] = (
-                (a / np.pi)
-                * s[i]
-                * np.exp(-2 * a * s[i] ** 2)
-                * (
-                    np.pi
-                    * np.exp((3 * a / 2) * s[i] ** 2)
-                    * (a * s[i] ** 2 - 3)
-                    * (
-                        math.erf(np.sqrt(a / 6) * s[i])
-                        - math.erf(np.sqrt(3 * a / 2) * s[i])
-                        + np.sqrt(6 * np.pi * a)
-                        * s[i]
-                        * (np.exp((4 * a / 3) * s[i] ** 2) - 3)
-                    )
-                )
-            )
-
-    return p
 
 
 def binning(eigenvalues, maxbins):
@@ -118,6 +69,29 @@ def binning(eigenvalues, maxbins):
     binned_data = [eigenvalues[digitized == i] for i in range(1, len(bins))]
 
     return binned_data
+
+
+def Tuning(spacings):
+
+    length = len(spacings)
+    print("lunghezza", length)
+    row = int(length / 5)
+    bins = np.zeros((row, 5))
+
+    for i in range(0, length - 5, 5):
+        k = int(i / 5)
+        for j in range(5):
+            if (spacings[i + j] - spacings[i]) < (spacings[i + 4] - spacings[i + j]):
+                bins[k, j] = spacings[i]
+            else:
+                bins[k, j] = spacings[i + 4]
+    # print("Bin Boundaries: \n", bins)
+
+    new_spacings = []
+    for i in range(len(bins)):
+        new_spacings.extend(bins[i])
+
+    return new_spacings
 
 
 def histogramFunction(sp, kind: str, bins, low, high):
@@ -164,21 +138,6 @@ def histogramFunction(sp, kind: str, bins, low, high):
     plt.legend()
     plt.show()
 
-def Sturge(data):
-    length = len(data)
-    return round(1.5 * (np.log2(length) + 1))
-
-def CreateRanges(data, num=10):
-
-    emin=np.amin(np.abs(data[:, 4:204]))
-    emax=np.amax(np.abs(data[:, 4:204]))
-    ranger=np.linspace(emin, emax, num)
-
-    rnglist=[]
-    for i in range(len(ranger)-1):
-        rnglist.append([round(ranger[i], 4), round(ranger[i+1], 4)])
-    
-    return np.array(rnglist), emin, emax
 
 def IPR(data, kind):
 
@@ -233,15 +192,68 @@ def IPR(data, kind):
     ]  # find <\lambda> along all paths
     print("lunghezza ipr", len(IPR_mean))
     plt.figure()
-    plt.title(r"PR vs $\lambda$" f" for {kind} phase", fontsize=13)
+    plt.title(r"IPR vs $\lambda$" f" for {kind} phase", fontsize=13)
     plt.xlabel(r"$<\lambda>$", fontsize=15)
-    plt.ylabel("<PR>", fontsize=15)
+    plt.ylabel("<IPR>", fontsize=15)
     plt.scatter(mean, IPR_mean, s=8, c="b")
     plt.legend()
     plt.show()
+
 
 def reshape_to_matrix(array):
 
     shape = (round(len(array) / 100), 100)
     rows, cols = shape
     return [[array[i * cols + j] for j in range(cols)] for i in range(rows)]
+
+
+def distribution(sp, kind):
+
+    """Plot theoretical distributions of GSE, GOE, GUE ensemble distributions picking the min and max values of the spacing array
+    calculated in the main program"""
+    s = np.linspace(0, max(sp), len(sp))
+    p = np.zeros(len(s))
+
+    if kind == "GOE":
+        for i in range(len(p)):
+            p[i] = np.pi / 2 * s[i] * np.exp(-np.pi / 4 * s[i] ** 2)
+
+    if kind == "GUE":
+        for i in range(len(p)):
+            p[i] = (32 / np.pi ** 2) * s[i] ** 2 * np.exp(-4 / np.pi * s[i] ** 2)
+
+    if kind == "GSE":
+        for i in range(len(p)):
+            p[i] = (
+                2 ** 18
+                / (3 ** 6 * np.pi ** 3)
+                * s[i] ** 4
+                * np.exp(-(64 / (9 * np.pi)) * s[i] ** 2)
+            )
+    if kind == "Poisson":
+        for i in range(len(p)):
+            p[i] = np.exp(-s[i])
+
+    if kind == "GOE FN":  # lasciamo perdere va...
+
+        a = (27 / 8) * np.pi
+        for i in range(len(p)):
+            p[i] = (
+                (a / np.pi)
+                * s[i]
+                * np.exp(-2 * a * s[i] ** 2)
+                * (
+                    np.pi
+                    * np.exp((3 * a / 2) * s[i] ** 2)
+                    * (a * s[i] ** 2 - 3)
+                    * (
+                        math.erf(np.sqrt(a / 6) * s[i])
+                        - math.erf(np.sqrt(3 * a / 2) * s[i])
+                        + np.sqrt(6 * np.pi * a)
+                        * s[i]
+                        * (np.exp((4 * a / 3) * s[i] ** 2) - 3)
+                    )
+                )
+            )
+
+    return p
