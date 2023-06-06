@@ -379,7 +379,7 @@ if __name__ == "__main__":
 # ChatGPT tells me this:
 
 # You are correct, I apologize for the confusion in my previous response.
-# The field strength tensor Fμν is a 3x3 matrix in color space, and is given by:
+# The field strength tensor Fμν is a 3x3 matrix (NO) in color space, and is given by:
 
 # Fμν = ∂μAν - ∂νAμ + ig[Aμ, Aν]
 
