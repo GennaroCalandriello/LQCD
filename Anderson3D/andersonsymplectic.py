@@ -4,9 +4,10 @@ from scipy import optimize
 import numpy as np
 from scipy.linalg import expm
 from numba import njit
+from sympy import Inverse
 from torch import rand
 
-from module.anderson2d import *
+from module.functions import *
 
 import os
 
@@ -19,6 +20,8 @@ references:
 sigma_z = np.array([[1, 0], [0, -1]], dtype=np.complex128)  # Spin operator
 sigma_x = np.array([[0, 1], [1, 0]], dtype=np.complex128)  # Spin operator
 sigma_y = np.array([[0, -1j], [1j, 0]], dtype=np.complex128)  # Spin operator
+
+generateHamiltonian = False  # True to generate the Hamiltonian, False to load it
 
 
 @njit()
@@ -253,6 +256,35 @@ def Hamiltonian3D():
 
     # On-site disorder term
 
+    # Nearest neighbors
+    for i in range(L):
+        for j in range(L):
+            for k in range(L):
+                # neighbors = [
+                #     (i + 1, j, k),
+                #     (i, j + 1, k),
+                #     (i, j, k + 1),
+                # ]
+                neighbors = [
+                    (i + 1, j, k),
+                    (i - 1, j, k),
+                    (i, j + 1, k),
+                    (i, j - 1, k),
+                    (i, j, k + 1),
+                    (i, j, k - 1),
+                ]
+                neighbors = [(n_i % L, n_j % L, n_k % L) for n_i, n_j, n_k in neighbors]
+
+                for nx, ny, nz in neighbors:
+                    idx1 = 2 * (i * L * L + j * L + k)
+                    idx2 = 2 * (nx * L * L + ny * L + nz)
+
+                    H[idx1 : idx1 + 2, idx2 : idx2 + 2] = R(
+                        betaij[idx1, idx2],
+                        alphaij[idx1, idx2],
+                        gammaij[idx1, idx2],
+                    )
+
     for i in range(L):
         for j in range(L):
             for k in range(L):
@@ -266,42 +298,13 @@ def Hamiltonian3D():
                 )
                 H[idx : idx + 2, idx : idx + 2] = disorderMatrix  # on diagonal correct
 
-        # Nearest neighbors
-    for i in range(L):
-        for j in range(L):
-            for k in range(L):
-                neighbors = [
-                    (i - 1, j, k),
-                    (i + 1, j, k),
-                    (i, j - 1, k),
-                    (i, j + 1, k),
-                    (i, j, k - 1),
-                    (i, j, k + 1),
-                ]
-                neighbors = [(n_i % L, n_j % L, n_k % L) for n_i, n_j, n_k in neighbors]
-
-                count = 0
-                for nx, ny, nz in neighbors:
-                    count += 1
-                    if count % 1 == 0 or count % 2 == 0:
-                        sigma = sigma_x
-                    if count % 3 == 0 or count % 4 == 0:
-                        sigma = sigma_y
-                    if count % 5 == 0 or count % 6 == 0:
-                        sigma = sigma_z
-
-                    idx1 = 2 * (i * L * L + j * L + k)
-                    idx2 = 2 * (nx * L * L + ny * L + nz)
-                    H[idx1 : idx1 + 2, idx2 : idx2 + 2] = R(
-                        betaij[idx1, idx2],
-                        alphaij[idx1, idx2],
-                        gammaij[idx1, idx2],
-                    )
     return H
 
 
 @njit()
 def Hamiltonian3D_2puntozer():
+    """Naaaaah"""
+
     H = np.zeros((2 * L * L * L, 2 * L * L * L), dtype=np.complex128)
     betaij, alphaij, gammaij = Rpar()
 
@@ -310,7 +313,7 @@ def Hamiltonian3D_2puntozer():
             for k in range(L):
                 idx = 2 * (i * L * L + j * L + k)
                 H[idx : idx + 2, idx : idx + 2] = (
-                    np.random.uniform(-W / 2, W / 2) * sigma_z @ sigma_z
+                    np.random.uniform(-W / 2, W / 2) * sigma_z
                 )
 
     for i in range(L):
@@ -334,54 +337,75 @@ def Hamiltonian3D_2puntozer():
                 H[kkp1 : kkp1 + 2, idx : idx + 2] = 1
                 H[idx : idx + 2, kkp1 : kkp1 + 2] = 1
 
-    print(H)
     return H
 
 
+def IPR(psi, ev):
+    """----------------------------------------------------------------
+    Inverse participation ratio.
+    -------------------------------------------------------------------
+    """
+    print("Calculating IPR...")
+    IPR_list = []
+    for i in range(len(psi)):
+        IPR_list.append(np.sum(np.abs(psi[:, i]) ** 4))
+    plt.plot(ev, IPR_list, "o")
+    plt.show()
+
+
 def main():
-    H = Hamiltonian3D()
+    if generateHamiltonian:
+        H = Hamiltonian3D()
 
-    print("---- Hamiltonian generated! ----", H.shape)
+        print("---- Hamiltonian (GSE) generated! ----", H.shape)
 
-    (energy_levels, eigenstates) = linalg.eigh(H)
-    np.savetxt("eigenvalues_symplectic.txt", energy_levels)
+        (energy_levels, eigenstates) = linalg.eigh(H)
 
-    # The diagonalization routine does not sort the eigenvalues (which is stupid, by the way)
-    # Thus, sort them
-    # idx = np.argsort(energy_levels)
-    # # energy_levels = energy_levels[idx]
+        np.savetxt(f"results/eigenvalues_symplectic_L_{L}.txt", energy_levels)
 
-    # eigenstates = eigenstates[:, idx]
-    print("Number of eigenvalues: ", len(energy_levels))
-    # energy_levels = energy_levels[:200]
-    unfolded = np.array(unfold_spectrum(energy_levels)[1])
-    p = distribution(unfolded, "GUE")
+        # InverseParticipationRatio = IPR(eigenstates, energy_levels)
+
+    else:
+        energy_levels = np.loadtxt(f"results/eigenvalues_symplectic_L_{L}.txt")
+        # energy_levels = energy_levels[10000:]
+
+    # For symplectic Anderson model use the Farther Neighbor Spacing Distribution in CnDiff function
+    unfolded = np.array(unfold_spectrum(energy_levels, kind="FN")[1])
+    unfolded = unfolded + 1
+    p = distribution(unfolded, "GSE")
 
     plt.figure()
-    plt.title("ULSD for symplectic Anderson model")
+    plt.title("ULSD for symplectic Anderson Hamiltonian", fontsize=16)
     plt.hist(
         unfolded,
         bins=FreedmanDiaconis(unfolded),
         density=True,
         histtype="step",
-        color="b",
-        label="unfolded spectrum",
+        color="forestgreen",
+        label=f"unfolded spectrum L={L}",
     )
-    plt.xlabel("s")
-    plt.ylabel("p(s)")
+    plt.xlabel("s", fontsize=12)
+    plt.ylabel("p(s)", fontsize=12)
     plt.plot(
         np.linspace(min(unfolded), max(unfolded), len(p)),
         distribution(unfolded, "GSE"),
         "--",
         label="GSE",
-        color="b",
+        color="forestgreen",
     )
     plt.plot(
         np.linspace(min(unfolded), max(unfolded), len(p)),
         distribution(unfolded, "GUE"),
         "--",
         label="GUE",
-        color="r",
+        color="lightgrey",
+    )
+    plt.plot(
+        np.linspace(min(unfolded), max(unfolded), len(p)),
+        distribution(unfolded, "GOE"),
+        "--",
+        label="GOE",
+        color="grey",
     )
     plt.legend()
     plt.show()
